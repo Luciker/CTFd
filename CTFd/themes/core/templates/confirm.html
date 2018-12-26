@@ -28,9 +28,9 @@
 								aria-hidden="true">×</span></button>
 					</div>
 				{% endfor %}
-				{% if team %}
+				{% if user %}
 				<h3 class="text-center">
-					We've sent a confirmation email to {{ team.email }}
+					We've sent a confirmation email to {{ user.email }}
 				</h3>
 
 				<br>
@@ -40,8 +40,10 @@
 				</h4>
 				{% endif %}
 
-				{% if username %}
-				<form method="POST" action="{{ request.script_root }}/confirm">
+				<hr>
+
+				{% if name %}
+				<form method="POST" action="{{ url_for('auth.confirm') }}">
 					<h4 class="text-center">
 						Need to resend the confirmation email?
 					</h4>
@@ -57,6 +59,6 @@
 {% endblock %}
 
 {% block scripts %}
-	<script src="{{ request.script_root }}/themes/{{ ctf_theme() }}/static/js/style.js"></script>
+	<script src="{{ url_for('views.themes', theme=get_ctf_theme(), path='js/style.js') }}"></script>
 {% endblock %}
 

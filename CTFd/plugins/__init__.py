@@ -3,20 +3,19 @@ import importlib
 import os
 
 from collections import namedtuple
-from flask.helpers import safe_join
 from flask import current_app as app, send_file, send_from_directory, abort
-from CTFd.utils import (
-    admins_only as admins_only_wrapper,
+from CTFd.utils.decorators import admins_only as admins_only_wrapper
+from CTFd.utils.plugins import (
     override_template as utils_override_template,
-    register_plugin_script as utils_register_plugin_script,
-    register_plugin_stylesheet as utils_register_plugin_stylesheet,
-    pages as db_pages
+    register_script as utils_register_plugin_script,
+    register_stylesheet as utils_register_plugin_stylesheet,
+    register_admin_script as utils_register_admin_plugin_script,
+    register_admin_stylesheet as utils_register_admin_plugin_stylesheet
 )
+from CTFd.utils.config.pages import get_pages
 
 
 Menu = namedtuple('Menu', ['title', 'route'])
-ADMIN_PLUGIN_MENU_BAR = []
-USER_PAGE_MENU_BAR = []
 
 
 def register_plugin_assets_directory(app, base_path, admins_only=False):
@@ -83,6 +82,26 @@ def register_plugin_stylesheet(*args, **kwargs):
     utils_register_plugin_stylesheet(*args, **kwargs)
 
 
+def register_admin_plugin_script(*args, **kwargs):
+    """
+    Adds a given script to the base.html of the admin theme which all admin pages inherit from
+    :param args:
+    :param kwargs:
+    :return:
+    """
+    utils_register_admin_plugin_script(*args, **kwargs)
+
+
+def register_admin_plugin_stylesheet(*args, **kwargs):
+    """
+    Adds a given stylesheet to the base.html of the admin theme which all admin pages inherit from
+    :param args:
+    :param kwargs:
+    :return:
+    """
+    utils_register_admin_plugin_stylesheet(*args, **kwargs)
+
+
 def register_admin_plugin_menu_bar(title, route):
     """
     Registers links on the Admin Panel menubar/navbar
@@ -92,7 +111,7 @@ def register_admin_plugin_menu_bar(title, route):
     :return:
     """
     am = Menu(title=title, route=route)
-    ADMIN_PLUGIN_MENU_BAR.append(am)
+    app.admin_plugin_menu_bar.append(am)
 
 
 def get_admin_plugin_menu_bar():
@@ -101,7 +120,7 @@ def get_admin_plugin_menu_bar():
 
     :return: Returns a list of Menu namedtuples. They have name, and route attributes.
     """
-    return ADMIN_PLUGIN_MENU_BAR
+    return app.admin_plugin_menu_bar
 
 
 def register_user_page_menu_bar(title, route):
@@ -113,7 +132,7 @@ def register_user_page_menu_bar(title, route):
     :return:
     """
     p = Menu(title=title, route=route)
-    USER_PAGE_MENU_BAR.append(p)
+    app.plugin_menu_bar.append(p)
 
 
 def get_user_page_menu_bar():
@@ -122,7 +141,7 @@ def get_user_page_menu_bar():
 
     :return: Returns a list of Menu namedtuples. They have name, and route attributes.
     """
-    return db_pages() + USER_PAGE_MENU_BAR
+    return get_pages() + app.plugin_menu_bar
 
 
 def bypass_csrf_protection(f):
@@ -146,15 +165,24 @@ def init_plugins(app):
     :param app: A CTFd application
     :return:
     """
-    modules = glob.glob(os.path.dirname(__file__) + "/*")
-    blacklist = {'__pycache__'}
-    for module in modules:
-        module_name = os.path.basename(module)
-        if os.path.isdir(module) and module_name not in blacklist:
-            module = '.' + module_name
-            module = importlib.import_module(module, package='CTFd.plugins')
-            module.load(app)
-            print(" * Loaded module, %s" % module)
+    app.admin_plugin_scripts = []
+    app.admin_plugin_stylesheets = []
+    app.plugin_scripts = []
+    app.plugin_stylesheets = []
+
+    app.admin_plugin_menu_bar = []
+    app.plugin_menu_bar = []
+
+    if app.config.get('SAFE_MODE', False) is False:
+        modules = sorted(glob.glob(os.path.dirname(__file__) + "/*"))
+        blacklist = {'__pycache__'}
+        for module in modules:
+            module_name = os.path.basename(module)
+            if os.path.isdir(module) and module_name not in blacklist:
+                module = '.' + module_name
+                module = importlib.import_module(module, package='CTFd.plugins')
+                module.load(app)
+                print(" * Loaded module, %s" % module)
 
     app.jinja_env.globals.update(get_admin_plugin_menu_bar=get_admin_plugin_menu_bar)
     app.jinja_env.globals.update(get_user_page_menu_bar=get_user_page_menu_bar)
