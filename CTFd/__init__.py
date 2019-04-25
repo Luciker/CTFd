@@ -3,26 +3,32 @@ import os
 
 from distutils.version import StrictVersion
 from flask import Flask, Request
+from flask_migrate import upgrade, stamp
 from werkzeug.utils import cached_property
-from werkzeug.contrib.fixers import ProxyFix
+from werkzeug.middleware.proxy_fix import ProxyFix
 from jinja2 import FileSystemLoader
 from jinja2.sandbox import SandboxedEnvironment
 from six.moves import input
 
 from CTFd import utils
-from CTFd.utils.migrations import migrations, migrate, upgrade, stamp, create_database
+from CTFd.utils.migrations import migrations, create_database
 from CTFd.utils.sessions import CachingSessionInterface
 from CTFd.utils.updates import update_check
-from CTFd.utils.initialization import init_request_processors, init_template_filters, init_template_globals, init_logs
-from CTFd.utils.events import socketio
+from CTFd.utils.initialization import (
+    init_request_processors,
+    init_template_filters,
+    init_template_globals,
+    init_logs,
+    init_events,
+)
 from CTFd.plugins import init_plugins
 
 # Hack to support Unicode in Python 2 properly
 if sys.version_info[0] < 3:
-    reload(sys)
+    reload(sys)  # noqa: F821
     sys.setdefaultencoding("utf-8")
 
-__version__ = '2.0.5'
+__version__ = '2.1.0'
 
 
 class CTFdRequest(Request):
@@ -112,7 +118,7 @@ def create_app(config='CTFd.config.Config'):
         theme_loader = ThemeLoader(os.path.join(app.root_path, 'themes'), followlinks=True)
         app.jinja_loader = theme_loader
 
-        from CTFd.models import db, Teams, Solves, Challenges, Fails, Flags, Tags, Files, Tracking
+        from CTFd.models import db, Teams, Solves, Challenges, Fails, Flags, Tags, Files, Tracking  # noqa: F401
 
         url = create_database()
 
@@ -147,15 +153,25 @@ def create_app(config='CTFd.config.Config'):
         cache.init_app(app)
         app.cache = cache
 
-        # If you have multiple workers you must have a shared cache
-        socketio.init_app(
-            app,
-            async_mode=app.config.get('SOCKETIO_ASYNC_MODE'),
-            message_queue=app.config.get('CACHE_REDIS_URL')
-        )
-
-        if app.config.get('REVERSE_PROXY'):
-            app.wsgi_app = ProxyFix(app.wsgi_app)
+        reverse_proxy = app.config.get('REVERSE_PROXY')
+        if reverse_proxy:
+            if ',' in reverse_proxy:
+                proxyfix_args = [int(i) for i in reverse_proxy.split(',')]
+                app.wsgi_app = ProxyFix(
+                    app.wsgi_app,
+                    None,
+                    *proxyfix_args
+                )
+            else:
+                app.wsgi_app = ProxyFix(
+                    app.wsgi_app,
+                    num_proxies=None,
+                    x_for=1,
+                    x_proto=1,
+                    x_host=1,
+                    x_port=1,
+                    x_prefix=1
+                )
 
         version = utils.get_config('ctf_version')
 
@@ -207,6 +223,7 @@ def create_app(config='CTFd.config.Config'):
         app.register_error_handler(502, gateway_error)
 
         init_logs(app)
+        init_events(app)
         init_plugins(app)
 
         return app

@@ -1,16 +1,12 @@
-from flask import session
-from sqlalchemy.sql.expression import union_all
-from marshmallow import fields, post_load
 from marshmallow import validate, ValidationError, pre_load
-from marshmallow.decorators import validates_schema
 from marshmallow_sqlalchemy import field_for
 from CTFd.models import ma, Users
 from CTFd.utils import get_config
-from CTFd.utils.validators import unique_email, validate_country_code
+from CTFd.utils.validators import validate_country_code
 from CTFd.utils.user import is_admin, get_current_user
-from CTFd.utils.countries import lookup_country_code
-from CTFd.utils.crypto import verify_password, hash_password
+from CTFd.utils.crypto import verify_password
 from CTFd.utils.email import check_email_is_whitelisted
+from CTFd.utils import string_types
 
 
 class UserSchema(ma.ModelSchema):
@@ -66,6 +62,7 @@ class UserSchema(ma.ModelSchema):
             return
 
         existing_user = Users.query.filter_by(name=name).first()
+        current_user = get_current_user()
         if is_admin():
             user_id = data.get('id')
             if user_id:
@@ -73,9 +70,12 @@ class UserSchema(ma.ModelSchema):
                     raise ValidationError('User name has already been taken', field_names=['name'])
             else:
                 if existing_user:
-                    raise ValidationError('User name has already been taken', field_names=['name'])
+                    if current_user:
+                        if current_user.id != existing_user.id:
+                            raise ValidationError('User name has already been taken', field_names=['name'])
+                    else:
+                        raise ValidationError('User name has already been taken', field_names=['name'])
         else:
-            current_user = get_current_user()
             if name == current_user.name:
                 return data
             else:
@@ -92,7 +92,7 @@ class UserSchema(ma.ModelSchema):
             return
 
         existing_user = Users.query.filter_by(email=email).first()
-
+        current_user = get_current_user()
         if is_admin():
             user_id = data.get('id')
             if user_id:
@@ -100,9 +100,12 @@ class UserSchema(ma.ModelSchema):
                     raise ValidationError('Email address has already been used', field_names=['email'])
             else:
                 if existing_user:
-                    raise ValidationError('Email address has already been used', field_names=['email'])
+                    if current_user:
+                        if current_user.id != existing_user.id:
+                            raise ValidationError('Email address has already been used', field_names=['email'])
+                    else:
+                        raise ValidationError('Email address has already been used', field_names=['email'])
         else:
-            current_user = get_current_user()
             if email == current_user.email:
                 return data
             else:
@@ -182,9 +185,9 @@ class UserSchema(ma.ModelSchema):
 
     def __init__(self, view=None, *args, **kwargs):
         if view:
-            if type(view) == str:
+            if isinstance(view, string_types):
                 kwargs['only'] = self.views[view]
-            elif type(view) == list:
+            elif isinstance(view, list):
                 kwargs['only'] = view
 
         super(UserSchema, self).__init__(*args, **kwargs)

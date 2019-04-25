@@ -2,7 +2,14 @@
 # -*- coding: utf-8 -*-
 
 from CTFd.utils import set_config
-from tests.helpers import *
+from CTFd.models import Users
+from tests.helpers import (create_ctfd,
+                           destroy_ctfd,
+                           register_user,
+                           login_as_user,
+                           gen_user,
+                           gen_team,
+                           gen_award)
 
 
 def test_teams_get():
@@ -19,6 +26,27 @@ def test_teams_get():
             set_config('account_visibility', 'admins')
             r = client.get('/teams')
             assert r.status_code == 404
+    destroy_ctfd(app)
+
+
+def test_accessing_hidden_teams():
+    """Hidden teams should not give any data from /teams or /api/v1/teams"""
+    app = create_ctfd(user_mode="teams")
+    with app.app_context():
+        register_user(app)
+        register_user(app, name="visible_user", email="visible_user@ctfd.io")
+        with login_as_user(app, name="visible_user") as client:
+            user = Users.query.filter_by(id=2).first()
+            team = gen_team(app.db, name='visible_team', hidden=True)
+            team.members.append(user)
+            user.team_id = team.id
+            app.db.session.commit()
+
+            assert client.get('/teams/1').status_code == 404
+            assert client.get('/api/v1/teams/1').status_code == 404
+            assert client.get('/api/v1/teams/1/solves').status_code == 404
+            assert client.get('/api/v1/teams/1/fails').status_code == 404
+            assert client.get('/api/v1/teams/1/awards').status_code == 404
     destroy_ctfd(app)
 
 

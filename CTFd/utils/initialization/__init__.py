@@ -1,4 +1,4 @@
-from flask import Flask, current_app as app, request, session, redirect, url_for, abort, render_template
+from flask import request, session, redirect, url_for, abort, render_template
 from werkzeug.wsgi import DispatcherMiddleware
 from CTFd.models import db, Tracking
 
@@ -8,7 +8,7 @@ from CTFd.utils.dates import unix_time_millis, unix_time, isoformat
 from CTFd.utils import config
 from CTFd.utils.config import can_send_mail, ctf_logo, ctf_name, ctf_theme
 from CTFd.utils.config.pages import get_pages
-
+from CTFd.utils.events import EventManager, RedisEventManager
 from CTFd.utils.plugins import (
     get_registered_stylesheets,
     get_registered_scripts,
@@ -35,6 +35,7 @@ from sqlalchemy.exc import InvalidRequestError, IntegrityError
 import datetime
 import logging
 import os
+import sys
 
 
 def init_template_filters(app):
@@ -85,27 +86,51 @@ def init_logs(app):
         'registrations': os.path.join(log_dir, 'registrations.log')
     }
 
-    for log in logs.values():
-        if not os.path.exists(log):
-            open(log, 'a').close()
+    try:
+        for log in logs.values():
+            if not os.path.exists(log):
+                open(log, 'a').close()
 
-    submission_log = logging.handlers.RotatingFileHandler(logs['submissions'], maxBytes=10000)
-    login_log = logging.handlers.RotatingFileHandler(logs['logins'], maxBytes=10000)
-    registration_log = logging.handlers.RotatingFileHandler(logs['registrations'], maxBytes=10000)
+        submission_log = logging.handlers.RotatingFileHandler(logs['submissions'], maxBytes=10000)
+        login_log = logging.handlers.RotatingFileHandler(logs['logins'], maxBytes=10000)
+        registration_log = logging.handlers.RotatingFileHandler(logs['registrations'], maxBytes=10000)
+
+        logger_submissions.addHandler(
+            submission_log
+        )
+        logger_logins.addHandler(
+            login_log
+        )
+        logger_registrations.addHandler(
+            registration_log
+        )
+    except IOError:
+        pass
+
+    stdout = logging.StreamHandler(stream=sys.stdout)
 
     logger_submissions.addHandler(
-        submission_log
+        stdout
     )
     logger_logins.addHandler(
-        login_log
+        stdout
     )
     logger_registrations.addHandler(
-        registration_log
+        stdout
     )
 
     logger_submissions.propagate = 0
     logger_logins.propagate = 0
     logger_registrations.propagate = 0
+
+
+def init_events(app):
+    if app.config.get('CACHE_TYPE') == 'redis':
+        app.events_manager = RedisEventManager()
+    elif app.config.get('CACHE_TYPE') == 'filesystem':
+        app.events_manager = EventManager()
+    else:
+        app.events_manager = EventManager()
 
 
 def init_request_processors(app):

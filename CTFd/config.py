@@ -44,7 +44,7 @@ class Config(object):
 
         http://flask.pocoo.org/docs/latest/quickstart/#sessions
 
-    SQLALCHEMY_DATABASE_URI:
+    DATABASE_URL:
         The URI that specifies the username, password, hostname, port, and database of the server
         used to hold the CTFd database.
 
@@ -194,6 +194,12 @@ class Config(object):
 
     REVERSE_PROXY:
         Specifies whether CTFd is behind a reverse proxy or not. Set to True if using a reverse proxy like nginx.
+        You can also specify a comma seperated set of numbers specifying the reverse proxy configuration settings.
+
+        See https://werkzeug.palletsprojects.com/en/0.15.x/middleware/proxy_fix/#werkzeug.middleware.proxy_fix.ProxyFix.
+        For example to configure `x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1` specify `1,1,1,1,1`.
+
+        Alternatively if you specify `true` CTFd will default to the above behavior with all proxy settings set to 1.
 
     TEMPLATES_AUTO_RELOAD:
         Specifies whether Flask should check for modifications to templates and reload them automatically.
@@ -201,25 +207,22 @@ class Config(object):
     SQLALCHEMY_TRACK_MODIFICATIONS:
         Automatically disabled to suppress warnings and save memory. You should only enable this if you need it.
 
+    SWAGGER_UI:
+        Enable the Swagger UI endpoint at /api/v1/
+
     UPDATE_CHECK:
         Specifies whether or not CTFd will check whether or not there is a new version of CTFd
 
     APPLICATION_ROOT:
         Specifies what path CTFd is mounted under. It can be used to run CTFd in a subdirectory.
         Example: /ctfd
-
-    SOCKETIO_ASYNC_MODE:
-        Specifies what async mode SocketIO should use.
-        Specifying your own async mode is not recommended without the appropriate load balancing mechanisms
-        in place and proper understanding of how websockets are supported by Flask.
-        https://flask-socketio.readthedocs.io/en/latest/#deployment
     '''
     REVERSE_PROXY = os.getenv("REVERSE_PROXY") or False
     TEMPLATES_AUTO_RELOAD = (not os.getenv("TEMPLATES_AUTO_RELOAD"))  # Defaults True
-    SQLALCHEMY_TRACK_MODIFICATIONS = (not os.getenv("SQLALCHEMY_TRACK_MODIFICATIONS"))  # Defaults True
+    SQLALCHEMY_TRACK_MODIFICATIONS = os.getenv("SQLALCHEMY_TRACK_MODIFICATIONS") is not None  # Defaults False
+    SWAGGER_UI = '/' if os.getenv("SWAGGER_UI") is not None else False  # Defaults False
     UPDATE_CHECK = (not os.getenv("UPDATE_CHECK"))  # Defaults True
     APPLICATION_ROOT = os.getenv('APPLICATION_ROOT') or '/'
-    SOCKETIO_ASYNC_MODE = os.getenv('SOCKETIO_ASYNC_MODE')
 
     '''
     === OAUTH ===

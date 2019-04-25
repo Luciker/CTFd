@@ -1,9 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+from CTFd.models import Users
 from CTFd.utils import set_config
 from CTFd.utils.crypto import verify_password
-from tests.helpers import *
+from CTFd.schemas.users import UserSchema
+from tests.helpers import (create_ctfd,
+                           destroy_ctfd,
+                           register_user,
+                           login_as_user,
+                           gen_user)
 
 
 def test_api_users_get_public():
@@ -375,6 +381,30 @@ def test_api_user_patch_me_logged_in():
     destroy_ctfd(app)
 
 
+def test_api_admin_user_patch_me_logged_in():
+    """Can an admin patch /api/v1/users/me"""
+    app = create_ctfd()
+    with app.app_context():
+        with login_as_user(app, name='admin') as client:
+            r = client.patch(
+                '/api/v1/users/me',
+                json={
+                    "name": "user",
+                    "email": "user@ctfd.io",
+                    "password": "password",
+                    "confirm": "password",
+                    "country": "US"
+                }
+            )
+            assert r.status_code == 200
+            assert r.get_json()['data']['country'] == 'US'
+
+            user = Users.query.filter_by(id=1).first()
+            assert user.name == 'user'
+            assert user.email == 'user@ctfd.io'
+    destroy_ctfd(app)
+
+
 def test_api_user_change_name():
     """Can a user change their name via the API"""
     app = create_ctfd()
@@ -571,6 +601,54 @@ def test_api_user_get_awards():
     destroy_ctfd(app)
 
 
+def test_api_accessing_hidden_users():
+    """Hidden users should not be visible to normal users, only to admins"""
+    app = create_ctfd()
+    with app.app_context():
+        register_user(app, name="visible_user", email="visible_user@ctfd.io")
+        register_user(app, name="hidden_user", email="hidden_user@ctfd.io")  # ID 3
+        user = Users.query.filter_by(name="hidden_user").first()
+        user.hidden = True
+        app.db.session.commit()
+
+        with login_as_user(app, name="visible_user") as client:
+            assert client.get('/api/v1/users/3').status_code == 404
+            assert client.get('/api/v1/users/3/solves').status_code == 404
+            assert client.get('/api/v1/users/3/fails').status_code == 404
+            assert client.get('/api/v1/users/3/awards').status_code == 404
+
+        with login_as_user(app, name="admin") as client:
+            assert client.get('/api/v1/users/3').status_code == 200
+            assert client.get('/api/v1/users/3/solves').status_code == 200
+            assert client.get('/api/v1/users/3/fails').status_code == 200
+            assert client.get('/api/v1/users/3/awards').status_code == 200
+    destroy_ctfd(app)
+
+
+def test_api_accessing_banned_users():
+    """Banned users should not be visible to normal users, only to admins"""
+    app = create_ctfd()
+    with app.app_context():
+        register_user(app, name="visible_user", email="visible_user@ctfd.io")
+        register_user(app, name="banned_user", email="banned_user@ctfd.io")  # ID 3
+        user = Users.query.filter_by(name="banned_user").first()
+        user.banned = True
+        app.db.session.commit()
+
+        with login_as_user(app, name="visible_user") as client:
+            assert client.get('/api/v1/users/3').status_code == 404
+            assert client.get('/api/v1/users/3/solves').status_code == 404
+            assert client.get('/api/v1/users/3/fails').status_code == 404
+            assert client.get('/api/v1/users/3/awards').status_code == 404
+
+        with login_as_user(app, name="admin") as client:
+            assert client.get('/api/v1/users/3').status_code == 200
+            assert client.get('/api/v1/users/3/solves').status_code == 200
+            assert client.get('/api/v1/users/3/fails').status_code == 200
+            assert client.get('/api/v1/users/3/awards').status_code == 200
+    destroy_ctfd(app)
+
+
 def test_api_user_send_email():
     """Can an admin post /api/v1/users/<user_id>/email"""
     app = create_ctfd()
@@ -625,4 +703,23 @@ def test_api_user_send_email():
             })
             assert r.status_code == 200
 
+    destroy_ctfd(app)
+
+
+def test_api_user_get_schema():
+    """Can a user get /api/v1/users/<user_id> doesn't return unnecessary data"""
+    app = create_ctfd()
+    with app.app_context():
+        register_user(app, name="user1", email="user1@ctfd.io")  # ID 2
+        register_user(app, name="user2", email="user2@ctfd.io")  # ID 3
+
+        with app.test_client() as client:
+            r = client.get('/api/v1/users/3')
+            data = r.get_json()['data']
+            assert sorted(data.keys()) == sorted(UserSchema.views['user'] + ['score', 'place'])
+
+        with login_as_user(app, name="user1") as client:
+            r = client.get('/api/v1/users/3')
+            data = r.get_json()['data']
+            assert sorted(data.keys()) == sorted(UserSchema.views['user'] + ['score', 'place'])
     destroy_ctfd(app)

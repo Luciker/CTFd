@@ -1,22 +1,20 @@
 from flask import session, request, abort
 from flask_restplus import Namespace, Resource
-from CTFd.models import db, Users, Solves, Awards, Fails, Tracking, Unlocks, Submissions, Notifications
+from CTFd.models import db, Users, Solves, Awards, Tracking, Unlocks, Submissions, Notifications
 from CTFd.utils.decorators import (
     authed_only,
     admins_only,
     authed,
     ratelimit
 )
-from CTFd.cache import cache, clear_standings
+from CTFd.cache import clear_standings
 from CTFd.utils.config import get_mail_provider
-from CTFd.utils.email import sendmail
+from CTFd.utils.email import sendmail, user_created_notification
 from CTFd.utils.user import get_current_user, is_admin
-from CTFd.utils.decorators.visibility import check_account_visibility, check_score_visibility
+from CTFd.utils.decorators.visibility import check_account_visibility
 
 from CTFd.utils.config.visibility import (
     accounts_visible,
-    challenges_visible,
-    registration_visible,
     scores_visible
 )
 
@@ -32,7 +30,7 @@ users_namespace = Namespace('users', description="Endpoint to retrieve Users")
 class UserList(Resource):
     @check_account_visibility
     def get(self):
-        users = Users.query.filter_by(banned=False)
+        users = Users.query.filter_by(banned=False, hidden=False)
         response = UserSchema(view='user', many=True).dump(users)
 
         if response.errors:
@@ -46,6 +44,7 @@ class UserList(Resource):
             'data': response.data
         }
 
+    @users_namespace.doc(params={'notify': 'Whether to send the created user an email with their credentials'})
     @admins_only
     def post(self):
         req = request.get_json()
@@ -60,6 +59,17 @@ class UserList(Resource):
 
         db.session.add(response.data)
         db.session.commit()
+
+        if request.args.get('notify'):
+            name = response.data.name
+            email = response.data.email
+            password = req.get('password')
+
+            user_created_notification(
+                addr=email,
+                name=name,
+                password=password
+            )
 
         clear_standings()
 
@@ -77,6 +87,9 @@ class UserPublic(Resource):
     @check_account_visibility
     def get(self, user_id):
         user = Users.query.filter_by(id=user_id).first_or_404()
+
+        if (user.banned or user.hidden) and is_admin() is False:
+            abort(404)
 
         response = UserSchema(
             view=session.get('type', 'user')
@@ -192,6 +205,9 @@ class UserSolves(Resource):
                 abort(404)
             user = Users.query.filter_by(id=user_id).first_or_404()
 
+            if (user.banned or user.hidden) and is_admin() is False:
+                abort(404)
+
         solves = user.get_solves(
             admin=is_admin()
         )
@@ -225,6 +241,9 @@ class UserFails(Resource):
             if accounts_visible() is False or scores_visible() is False:
                 abort(404)
             user = Users.query.filter_by(id=user_id).first_or_404()
+
+            if (user.banned or user.hidden) and is_admin() is False:
+                abort(404)
 
         fails = user.get_fails(
             admin=is_admin()
@@ -265,6 +284,9 @@ class UserAwards(Resource):
             if accounts_visible() is False or scores_visible() is False:
                 abort(404)
             user = Users.query.filter_by(id=user_id).first_or_404()
+
+            if (user.banned or user.hidden) and is_admin() is False:
+                abort(404)
 
         awards = user.get_awards(
             admin=is_admin()
