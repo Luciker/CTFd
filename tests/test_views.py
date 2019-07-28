@@ -13,7 +13,9 @@ from tests.helpers import (
     gen_file,
     gen_page,
 )
+from CTFd.cache import clear_pages
 from CTFd.utils import set_config
+from CTFd.utils.config.pages import get_pages
 from CTFd.utils.encoding import hexencode
 from freezegun import freeze_time
 
@@ -89,6 +91,32 @@ def test_page_requiring_auth():
     destroy_ctfd(app)
 
 
+def test_hidden_pages():
+    """Test that hidden pages aren't on the navbar but can be loaded"""
+    app = create_ctfd()
+    with app.app_context():
+        page = gen_page(
+            app.db,
+            title="HiddenPageTitle",
+            route="this-is-a-hidden-route",
+            content="This is some HTML",
+            hidden=True,
+        )
+        clear_pages()
+        assert page not in get_pages()
+
+        with app.test_client() as client:
+            r = client.get("/")
+            assert r.status_code == 200
+            assert "HiddenPageTitle" not in r.get_data(as_text=True)
+
+        with app.test_client() as client:
+            r = client.get("/this-is-a-hidden-route")
+            assert r.status_code == 200
+            assert "This is some HTML" in r.get_data(as_text=True)
+    destroy_ctfd(app)
+
+
 def test_not_found():
     """Should return a 404 for pages that are not found"""
     app = create_ctfd()
@@ -112,7 +140,8 @@ def test_themes_handler():
             assert r.status_code == 404
             r = client.get("/themes/core/static/%2e%2e/%2e%2e/%2e%2e/utils.py")
             assert r.status_code == 404
-            r = client.get("/themes/core/static/%2e%2e%2f%2e%2e%2f%2e%2e%2futils.py")
+            r = client.get(
+                "/themes/core/static/%2e%2e%2f%2e%2e%2f%2e%2e%2futils.py")
             assert r.status_code == 404
             r = client.get("/themes/core/static/..%2f..%2f..%2futils.py")
             assert r.status_code == 404
@@ -191,10 +220,9 @@ def test_user_can_access_files():
             assert r.status_code == 200
             assert r.get_data(as_text=True) == "testing file load"
 
-            with freeze_time("2017-10-7"):
-                set_config(
-                    "end", "1507262400"
-                )  # Friday, October 6, 2017 12:00:00 AM GMT-04:00 DST
+            with freeze_time("2017-10-5"):
+                # Friday, October 6, 2017 12:00:00 AM GMT-04:00 DST
+                set_config("start", "1507262400")
                 for v in ("public", "private"):
                     set_config("challenge_visibility", v)
 
@@ -211,6 +239,30 @@ def test_user_can_access_files():
                     assert r.get_data(as_text=True) != "testing file load"
 
                     # Admins should be able to see files if the CTF hasn't started
+                    admin = login_as_user(app, "admin")
+                    r = admin.get(url)
+                    assert r.status_code == 200
+                    assert r.get_data(as_text=True) == "testing file load"
+
+            with freeze_time("2017-10-7"):
+                # Friday, October 6, 2017 12:00:00 AM GMT-04:00 DST
+                set_config("end", "1507262400")
+                for v in ("public", "private"):
+                    set_config("challenge_visibility", v)
+
+                    # Unauthed users shouldn't be able to see files if the CTF has ended
+                    client = app.test_client()
+                    r = client.get(url)
+                    assert r.status_code == 403
+                    assert r.get_data(as_text=True) != "testing file load"
+
+                    # Authed users shouldn't be able to see files if the CTF has ended
+                    client = login_as_user(app)
+                    r = client.get(url)
+                    assert r.status_code == 403
+                    assert r.get_data(as_text=True) != "testing file load"
+
+                    # Admins should be able to see files if the CTF has ended
                     admin = login_as_user(app, "admin")
                     r = admin.get(url)
                     assert r.status_code == 200
@@ -274,15 +326,108 @@ def test_user_can_access_files_with_auth_token():
                 assert r.get_data(as_text=True) != "testing file load"
                 set_config("challenge_visibility", "private")
 
-                with freeze_time("2017-10-7"):
-                    set_config(
-                        "end", "1507262400"
-                    )  # Friday, October 6, 2017 12:00:00 AM GMT-04:00 DST
+                with freeze_time("2017-10-5"):
+                    # Friday, October 6, 2017 12:00:00 AM GMT-04:00 DST
+                    set_config("start", "1507262400")
 
                     # Unauthed users shouldn't be able to see files if the CTF hasn't started
                     r = client.get(file_url)
                     assert r.status_code == 403
                     assert r.get_data(as_text=True) != "testing file load"
+
+                with freeze_time("2017-10-5"):
+                    # Friday, October 6, 2017 12:00:00 AM GMT-04:00 DST
+                    set_config("start", "1507262400")
+                    for v in ("public", "private"):
+                        set_config("challenge_visibility", v)
+
+                        # Unauthed users shouldn't be able to see files if the CTF hasn't started
+                        client = app.test_client()
+                        r = client.get(file_url)
+                        assert r.status_code == 403
+                        assert r.get_data(as_text=True) != "testing file load"
+
+                        # Authed users shouldn't be able to see files if the CTF hasn't started
+                        client = login_as_user(app)
+                        r = client.get(file_url)
+                        assert r.status_code == 403
+                        assert r.get_data(as_text=True) != "testing file load"
+
+                        # Admins should be able to see files if the CTF hasn't started
+                        admin = login_as_user(app, "admin")
+                        r = admin.get(file_url)
+                        assert r.status_code == 200
+                        assert r.get_data(as_text=True) == "testing file load"
+
+                with freeze_time("2017-10-7"):
+                    # Friday, October 6, 2017 12:00:00 AM GMT-04:00 DST
+                    set_config("end", "1507262400")
+                    for v in ("public", "private"):
+                        set_config("challenge_visibility", v)
+
+                        # Unauthed users shouldn't be able to see files if the CTF has ended
+                        client = app.test_client()
+                        r = client.get(file_url)
+                        assert r.status_code == 403
+                        assert r.get_data(as_text=True) != "testing file load"
+
+                        # Authed users shouldn't be able to see files if the CTF has ended
+                        client = login_as_user(app)
+                        r = client.get(file_url)
+                        assert r.status_code == 403
+                        assert r.get_data(as_text=True) != "testing file load"
+
+                        # Admins should be able to see files if the CTF has ended
+                        admin = login_as_user(app, "admin")
+                        r = admin.get(file_url)
+                        assert r.status_code == 200
+                        assert r.get_data(as_text=True) == "testing file load"
         finally:
             rmdir(directory)
+    destroy_ctfd(app)
+
+
+def test_user_can_access_files_if_view_after_ctf():
+    app = create_ctfd()
+    with app.app_context():
+        from CTFd.utils.uploads import rmdir
+
+        chal = gen_challenge(app.db)
+        chal_id = chal.id
+        path = app.config.get("UPLOAD_FOLDER")
+
+        md5hash = hexencode(os.urandom(16)).decode("utf-8")
+
+        location = os.path.join(path, md5hash, "test.txt")
+        directory = os.path.dirname(location)
+        model_path = os.path.join(md5hash, "test.txt")
+
+        try:
+            os.makedirs(directory)
+            with open(location, "wb") as obj:
+                obj.write("testing file load".encode())
+            gen_file(app.db, location=model_path, challenge_id=chal_id)
+
+            register_user(app)
+            with login_as_user(app) as client:
+                req = client.get("/api/v1/challenges/1")
+                data = req.get_json()
+                file_url = data["data"]["files"][0]
+
+                # After ctf end
+                with freeze_time("2017-10-7"):
+                    # Friday, October 6, 2017 12:00:00 AM GMT-04:00 DST
+                    set_config("end", "1507262400")
+
+                    r = client.get(file_url)
+                    assert r.status_code == 403
+                    assert r.get_data(as_text=True) != "testing file load"
+
+                    set_config("view_after_ctf", True)
+                    r = client.get(file_url)
+                    assert r.status_code == 200
+                    assert r.get_data(as_text=True) == "testing file load"
+        finally:
+            rmdir(directory)
+
     destroy_ctfd(app)
