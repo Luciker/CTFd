@@ -170,7 +170,7 @@ def register():
             .filter_by(email=email_address)
             .first()
         )
-        pass_short = len(password) == 0
+        pass_short = len(password.strip()) == 0
         pass_long = len(password) > 128
         valid_email = validators.validate_email(request.form["email"])
         team_name_email_check = validators.validate_email(name)
@@ -399,6 +399,15 @@ def oauth_redirect():
                     team = Teams(name=team_name, oauth_id=team_id, captain_id=user.id)
                     db.session.add(team)
                     db.session.commit()
+
+                team_size_limit = get_config("team_size", default=0)
+                if team_size_limit and len(team.members) >= team_size_limit:
+                    plural = "" if team_size_limit == 1 else "s"
+                    size_error = "Teams are limited to {limit} member{plural}.".format(
+                        limit=team_size_limit, plural=plural
+                    )
+                    error_for(endpoint="auth.login", message=size_error)
+                    return redirect(url_for("auth.login"))
 
                 team.members.append(user)
                 db.session.commit()

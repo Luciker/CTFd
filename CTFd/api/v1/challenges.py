@@ -38,7 +38,7 @@ from CTFd.utils import user as current_user
 from CTFd.utils.user import get_current_team
 from CTFd.utils.user import get_current_user
 from CTFd.plugins.challenges import get_chal_class
-from CTFd.utils.dates import ctf_ended, ctf_paused, ctftime
+from CTFd.utils.dates import ctf_ended, ctf_paused, ctftime, unix_time_to_utc
 from CTFd.utils.logging import log
 from CTFd.utils.security.signing import serialize
 from sqlalchemy.sql import and_
@@ -260,15 +260,18 @@ class Challenge(Resource):
         Model = get_model()
 
         if scores_visible() is True and accounts_visible() is True:
-            solves = (
-                Solves.query.join(Model, Solves.account_id == Model.id)
-                .filter(
-                    Solves.challenge_id == chal.id,
-                    Model.banned == False,
-                    Model.hidden == False,
-                )
-                .count()
+            solves = Solves.query.join(Model, Solves.account_id == Model.id).filter(
+                Solves.challenge_id == chal.id,
+                Model.banned == False,
+                Model.hidden == False,
             )
+
+            # Only show solves that happened before freeze time if configured
+            freeze = get_config("freeze")
+            if not is_admin() and freeze:
+                solves = solves.filter(Solves.date < unix_time_to_utc(freeze))
+
+            solves = solves.count()
             response["solves"] = solves
         else:
             response["solves"] = None
@@ -385,8 +388,9 @@ class ChallengeAttempt(Resource):
                 )
             log(
                 "submissions",
-                "[{date}] {name} submitted {submission} with kpm {kpm} [TOO FAST]",
+                "[{date}] {name} submitted {submission} on {challenge_id} with kpm {kpm} [TOO FAST]",
                 submission=request_data["submission"].encode("utf-8"),
+                challenge_id=challenge_id,
                 kpm=kpm,
             )
             # Submitting too fast
@@ -431,8 +435,9 @@ class ChallengeAttempt(Resource):
 
                 log(
                     "submissions",
-                    "[{date}] {name} submitted {submission} with kpm {kpm} [CORRECT]",
+                    "[{date}] {name} submitted {submission} on {challenge_id} with kpm {kpm} [CORRECT]",
                     submission=request_data["submission"].encode("utf-8"),
+                    challenge_id=challenge_id,
                     kpm=kpm,
                 )
                 return {
@@ -448,8 +453,9 @@ class ChallengeAttempt(Resource):
 
                 log(
                     "submissions",
-                    "[{date}] {name} submitted {submission} with kpm {kpm} [WRONG]",
+                    "[{date}] {name} submitted {submission} on {challenge_id} with kpm {kpm} [WRONG]",
                     submission=request_data["submission"].encode("utf-8"),
+                    challenge_id=challenge_id,
                     kpm=kpm,
                 )
 
@@ -481,8 +487,9 @@ class ChallengeAttempt(Resource):
         else:
             log(
                 "submissions",
-                "[{date}] {name} submitted {submission} with kpm {kpm} [ALREADY SOLVED]",
+                "[{date}] {name} submitted {submission} on {challenge_id} with kpm {kpm} [ALREADY SOLVED]",
                 submission=request_data["submission"].encode("utf-8"),
+                challenge_id=challenge_id,
                 kpm=kpm,
             )
             return {
